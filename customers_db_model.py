@@ -25,6 +25,7 @@ class CustomersDatabase:
         try:
             self.cursor.execute("SELECT password FROM buyer WHERE username = %s", (username,))
             stored_password = self.cursor.fetchone()
+            print("Db user details: ", username,stored_password)
             if stored_password and stored_password[0] == password:
                 return "Login successful"
             else:
