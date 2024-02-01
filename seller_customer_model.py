@@ -1,46 +1,39 @@
-import psycopg2
+import socket 
 import os
-from dotenv import load_dotenv
-
+from ast import literal_eval
 # '''INSERT INTO TABLE customers ({ newid }
 # )'''
 
-load_dotenv()
 
 class CustomerInterface:
     def __init__(self):
-        pw = os.getenv('PASSWORD')
-        self.connection = psycopg2.connect(f"dbname='customers_db' user='postgres' host='localhost' password='{pw}'")
-        self.cursor = self.connection.cursor()
-        try:
-            self.cursor.execute('''CREATE TABLE IF NOT EXISTS seller (
-                    id SERIAL PRIMARY KEY,
-                    username VARCHAR(32) NOT NULL,
-                    password VARCHAR(12) CHECK(char_length(password) BETWEEN 6 and 12),
-                    thumbs_up_count INTEGER DEFAULT 0,
-                    thumbs_down_count INTEGER DEFAULT 0,
-                    items_sold INTEGER DEFAULT 0
-                );''')
-        except Exception as e:
-            print("creation error", e)
-        self.connection.commit()
-        # self.table = [{"id": "12", "username": "user12","password":"12"}, \
-        #               {"id": "1", "username": "user1","password":"one"}]
+        '''
+        Initializes required parameters for socket connection and also begins communication. 
+        '''
+        self._HEADER = 64
+        self._SERVER = socket.gethostbyname(socket.gethostname())
+        self._PORT = 6080
+        self._ADDRESS = (self._SERVER, self._PORT)
+        self._FORMAT = "utf-8"
+        self.DISCONNECT_MSG = "bye"
+        self._RECEIVE = 1024
+        self.inititate_connection()
 
-
+    def inititate_connection(self):
+        self.db = socket.socket(family=socket.AF_INET, type = socket.SOCK_STREAM)
+        self.db.connect(self._ADDRESS)
 
     def insertCustomer(self, un, pw):
         try:
-            self.cursor.execute("INSERT INTO seller (username, password) VALUES \
-                    (%s, %s) returning id",(un, pw))
-            newid = self.cursor.fetchone()[0]
+            msg = f"INSERTAUTOID;seller;username,password;{un},{pw}"
+            self.send(msg)
+            response = self.db.recv(self._RECEIVE).decode(self._FORMAT)
         except Exception as e:
             print(e)
             return -1
 
-        print("last row id",newid)
-        self.connection.commit() 
-        return newid
+        print("last row id",response)
+        return response
     
         
     def getUser(self, un, pw=None):
@@ -49,15 +42,18 @@ class CustomerInterface:
             # self.cursor.execute("INSERT INTO ")
             # self.table.append({"id": newid, "username": un,"password":pw})
             if pw:
-                self.cursor.execute("SELECT id, username, password FROM seller WHERE username = %s AND password = %s",(un, pw))
-                user = self.cursor.fetchone()
+                msg = f"GETROWBYMULTICOL;seller;username,password;{un},{pw}"
+                self.send(msg)
+                user = self.db.recv(self._RECEIVE).decode(self._FORMAT)
             else:
-                self.cursor.execute("SELECT id, username, password FROM seller WHERE username = %s",(un))
-                user = self.cursor.fetchone()
-                
+                msg = f"GETROWBYCOL;seller;username;{un}"
+                self.send(msg)
+                user = self.db.recv(self._RECEIVE).decode(self._FORMAT)
+            print("user: ", user)
         except Exception as e:
             print(e)
             return -1
+        user = literal_eval(user)
         return user
         
 
@@ -68,10 +64,20 @@ class CustomerInterface:
         # return None
     
     def updateFeedback(self, seller_id,tu,td):
-        self.cursor.execute("UPDATE seller SET thumbs_up_count = %s, thumbs_down_count = %s WHERE id = %s",(tu,td, seller_id))
-        self.connection.commit()
-        return 1
-
-
-
-
+        msg = f"UPDATEONE;seller;thumbs_up_count,thumbs_down_count;{tu},{td};id;{seller_id}"
+        self.send(msg)
+        didUpdate = self.db.recv(self._RECEIVE).decode(self._FORMAT)
+        return didUpdate
+    
+    def send(self, msg):
+        '''
+        Conducts one send cycle - requires two messages to be sent
+        '''
+        # As number of bytes have to be known to receive message in python, db 
+        # first sends the length of the message in bytes and then the actual message   
+        message = msg.encode(self._FORMAT)
+        msg_length = len(message)
+        send_length = str(msg_length).encode(self._FORMAT)
+        padded_send = send_length+ b" "*(self._HEADER-len(send_length))
+        self.db.send(padded_send)
+        self.db.send(message)
